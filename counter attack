@@ -1,0 +1,134 @@
+<style>
+    body { margin: 0; background: #050505; color: #fff; font-family: 'Orbitron', sans-serif; overflow: hidden; }
+    canvas { display: block; filter: contrast(1.2) brightness(1.1); }
+    #ui { position: absolute; top: 20px; left: 20px; pointer-events: none; z-index: 5; }
+    #combo-container { 
+        position: absolute; top: 20px; right: 20px; text-align: right; 
+        font-size: 2rem; font-weight: bold; color: #ffcc00; text-shadow: 0 0 10px #ffcc00;
+    }
+    #menu, #shop { 
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(10, 10, 20, 0.95); padding: 50px; border: 1px solid #00f2ff; 
+        text-align: center; border-radius: 5px; box-shadow: 0 0 30px #00f2ff33;
+    }
+    .btn { 
+        background: #111; color: #00f2ff; border: 1px solid #00f2ff;
+        padding: 15px 30px; cursor: pointer; text-transform: uppercase; letter-spacing: 2px;
+        transition: 0.2s; margin: 10px;
+    }
+    .btn:hover { background: #00f2ff; color: #000; box-shadow: 0 0 20px #00f2ff; }
+</style>
+
+<div id="combo-container">COMBO x1</div>
+
+<script>
+    // --- HIGH GRAPHICS CONFIG ---
+    let particles = [];
+    let shakeIntensity = 0;
+    let combo = 1;
+    let comboTimer = 0;
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x; this.y = y;
+            this.v = { x: (Math.random() - 0.5) * 8, y: (Math.random() - 0.5) * 8 };
+            this.alpha = 1;
+            this.color = color;
+        }
+        draw() {
+            ctx.globalAlpha = this.alpha;
+            ctx.fillStyle = this.color;
+            ctx.fillRect(this.x, this.y, 3, 3);
+            ctx.globalAlpha = 1;
+        }
+        update() {
+            this.x += this.v.x; this.y += this.v.y;
+            this.alpha -= 0.02;
+        }
+    }
+
+    function createExplosion(x, y, color, count = 10) {
+        for(let i = 0; i < count; i++) particles.push(new Particle(x, y, color));
+        shakeIntensity = count / 2;
+    }
+
+    // --- ENHANCED ANIMATION LOOP ---
+    function animate(t) {
+        if(!gameActive || inShop) { requestAnimationFrame(animate); return; }
+        requestAnimationFrame(animate);
+
+        // --- Screen Shake Logic ---
+        let sx = (Math.random() - 0.5) * shakeIntensity;
+        let sy = (Math.random() - 0.5) * shakeIntensity;
+        ctx.setTransform(1, 0, 0, 1, sx, sy);
+        if(shakeIntensity > 0) shakeIntensity *= 0.9;
+
+        // Dark Background Trail
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+        ctx.fillRect(-100, -100, canvas.width + 200, canvas.height + 200);
+
+        if(isMouseDown) fire();
+        player.update();
+
+        // Combo Logic
+        if(comboTimer > 0) {
+            comboTimer--;
+        } else {
+            combo = 1;
+        }
+        document.getElementById('combo-container').innerText = `COMBO x${combo}`;
+
+        // Particles
+        particles.forEach((p, i) => {
+            p.update(); p.draw();
+            if(p.alpha <= 0) particles.splice(i, 1);
+        });
+
+        // Projectiles with GLOW
+        projectiles.forEach((p, pi) => {
+            p.x += p.v.x; p.y += p.v.y;
+            ctx.shadowBlur = 10; ctx.shadowColor = weaponData[p.type].color;
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); 
+            ctx.fillStyle = weaponData[p.type].color; ctx.fill();
+            ctx.shadowBlur = 0;
+
+            enemies.forEach((e, ei) => {
+                let dist = Math.hypot(p.x - e.x, p.y - e.y);
+                if (dist < p.r + e.r) {
+                    let isHeadshot = dist < e.r * 0.4;
+                    let points = (isHeadshot ? 50 : 10) * combo;
+                    score += points;
+                    
+                    // Combo Up
+                    combo++; comboTimer = 120; // 2 seconds at 60fps
+                    
+                    createExplosion(e.x, e.y, isHeadshot ? '#fff' : 'red', isHeadshot ? 25 : 12);
+                    enemies.splice(ei, 1);
+                    if(p.type !== 'sniper') projectiles.splice(pi, 1);
+                    updateUI();
+                }
+            });
+        });
+
+        enemies.forEach(e => {
+            let a = Math.atan2(player.y - e.y, player.x - e.x);
+            e.x += Math.cos(a) * e.s; e.y += Math.sin(a) * e.s;
+            
+            // Enemy Body
+            ctx.fillStyle = '#ff0033';
+            ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI*2); ctx.fill();
+            
+            // Neon Eye (Headshot Zone)
+            ctx.fillStyle = '#fff';
+            ctx.shadowBlur = 10; ctx.shadowColor = '#fff';
+            ctx.beginPath(); ctx.arc(e.x, e.y, e.r * 0.4, 0, Math.PI*2); ctx.fill();
+            ctx.shadowBlur = 0;
+
+            if (Math.hypot(player.x - e.x, player.y - e.y) < player.radius + e.r) {
+                createExplosion(player.x, player.y, '#00f2ff', 50);
+                setTimeout(() => location.reload(), 500);
+                gameActive = false;
+            }
+        });
+    }
+</script>
