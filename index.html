@@ -2,200 +2,146 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Neon Strike - 2D Extreme</title>
+    <title>Neon Strike - Fixed</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #000; color: #0ff; font-family: sans-serif; overflow: hidden; }
-        #game-ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
-        #hp-bg { width: 200px; height: 15px; background: #222; border: 1px solid #0ff; margin-top: 5px; }
-        #hp-fill { width: 100%; height: 100%; background: #0f0; transition: 0.1s; }
+        body { margin: 0; background: #000; color: #0ff; font-family: sans-serif; overflow: hidden; cursor: crosshair; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
+        #hp-bg { width: 200px; height: 12px; background: #333; border: 1px solid #0ff; margin-top: 5px; }
+        #hp-fill { width: 100%; height: 100%; background: #0f0; }
         #menu { 
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-            z-index: 20; text-align: center; background: rgba(0,0,0,0.9); 
-            padding: 50px; border: 2px solid #0ff; box-shadow: 0 0 20px #0ff; 
+            z-index: 20; text-align: center; background: #000; padding: 40px; border: 2px solid #0ff; 
         }
-        .btn { 
-            background: #0ff; color: #000; border: none; padding: 15px 40px; 
-            font-weight: bold; cursor: pointer; font-size: 20px; margin: 10px; width: 280px;
-        }
-        canvas { display: block; background: #000; }
+        .btn { background: #0ff; color: #000; border: none; padding: 15px; font-weight: bold; cursor: pointer; width: 250px; margin: 10px; font-size: 18px; }
+        canvas { display: block; }
     </style>
 </head>
 <body>
 
-    <div id="game-ui">
+    <div id="ui">
         SCORE: <span id="sc">0</span> | AMMO: <span id="am">10</span>
         <div id="hp-bg"><div id="hp-fill"></div></div>
-        <small id="status">PRESS [E] FOR ABILITY</small>
     </div>
 
     <div id="menu">
-        <h1 style="font-size: 50px; margin-bottom: 20px;">NEON STRIKE</h1>
-        <button class="btn" onclick="startGame('AR')">ASSAULT (Dash Ability)</button><br>
-        <button class="btn" onclick="startGame('SG')">SHOTGUN (Explode Ability)</button>
+        <h1>NEON STRIKE</h1>
+        <button class="btn" id="startAR">ASSAULT (Dash)</button><br>
+        <button class="btn" id="startSG">SHOTGUN (Explode)</button>
     </div>
 
     <canvas id="canvas"></canvas>
 
 <script>
+window.onload = function() {
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const scEl = document.getElementById('sc');
-    const amEl = document.getElementById('am');
-    const hpEl = document.getElementById('hp-fill');
     const menu = document.getElementById('menu');
-
+    
     let w, h, player, active = false, audioCtx = null;
-    let bullets = [], enemies = [], explosions = [], keys = {};
-    let score = 0, gun = 'AR', abilityCD = 0, timeScale = 1;
+    let bullets = [], enemies = [], keys = {}, score = 0, gun = 'AR';
+    let mx = 0, my = 0; // Mouse position
 
     function resize() {
         w = canvas.width = window.innerWidth;
         h = canvas.height = window.innerHeight;
     }
-    window.addEventListener('resize', resize);
+    window.onresize = resize;
     resize();
 
-    // FAIL-SAFE AUDIO
-    function beep(freq, type, dur, vol) {
+    window.onmousemove = e => { mx = e.clientX; my = e.clientY; };
+
+    function beep(freq, dur) {
         if (!audioCtx) return;
         const v = audioCtx.createOscillator();
         const g = audioCtx.createGain();
-        v.type = type;
-        v.frequency.setValueAtTime(freq * timeScale, audioCtx.currentTime);
-        g.gain.setValueAtTime(vol, audioCtx.currentTime);
+        v.frequency.value = freq;
+        g.gain.setValueAtTime(0.1, audioCtx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
         v.connect(g); g.connect(audioCtx.destination);
         v.start(); v.stop(audioCtx.currentTime + dur);
     }
 
-    function startGame(type) {
+    function init(type) {
         gun = type;
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         menu.style.display = 'none';
-        player = { x: w/2, y: h-100, hp: 100, ammo: 10 };
-        score = 0; bullets = []; enemies = []; explosions = [];
+        player = { x: w/2, y: h/2, hp: 100, ammo: 10 };
         active = true;
         
-        // Music interval
-        setInterval(() => { if(active) beep(80, 'triangle', 0.5, 0.05); }, 500);
+        // Background Beat
+        setInterval(() => { if(active) beep(60, 0.2); }, 600);
         update();
     }
+
+    document.getElementById('startAR').onclick = () => init('AR');
+    document.getElementById('startSG').onclick = () => init('SG');
 
     window.onkeydown = e => keys[e.key.toLowerCase()] = true;
     window.onkeyup = e => keys[e.key.toLowerCase()] = false;
 
-    window.onmousedown = e => {
+    window.onmousedown = () => {
         if (!active || player.ammo <= 0) return;
-        const ang = Math.atan2(e.clientY - player.y, e.clientX - player.x);
-        if (gun === 'AR') {
-            bullets.push({x: player.x, y: player.y, vx: Math.cos(ang)*20, vy: Math.sin(ang)*20, s:4, p:true});
-            player.ammo--;
-            beep(400, 'sawtooth', 0.1, 0.1);
-        } else {
-            for(let i=-2; i<=2; i++) bullets.push({x: player.x, y: player.y, vx: Math.cos(ang+i*0.15)*15, vy: Math.sin(ang+i*0.15)*15, s:6, p:true});
-            player.ammo -= 2;
-            beep(200, 'sawtooth', 0.2, 0.1);
-        }
-        if (player.ammo <= 0) setTimeout(() => player.ammo = 10, 800);
+        const ang = Math.atan2(my - player.y, mx - player.x);
+        bullets.push({x: player.x, y: player.y, vx: Math.cos(ang)*15, vy: Math.sin(ang)*15});
+        player.ammo--;
+        beep(300, 0.1);
+        if (player.ammo <= 0) setTimeout(() => player.ammo = 10, 1000);
     };
-
-    function doAbility() {
-        if (abilityCD > 0) return;
-        abilityCD = 300;
-        timeScale = 0.4; // SLOW MO
-        setTimeout(() => timeScale = 1, 2000);
-
-        if (gun === 'SG') {
-            explosions.push({x: player.x, y: player.y, r: 0, max: 250});
-            beep(60, 'square', 0.6, 0.3);
-        } else {
-            let dx = (keys.d?1:0)-(keys.a?1:0);
-            let dy = (keys.s?1:0)-(keys.w?1:0);
-            player.x += dx * 300; player.y += dy * 300;
-            beep(800, 'sine', 0.2, 0.2);
-        }
-    }
 
     function update() {
         if (!active) return;
         requestAnimationFrame(update);
 
-        // Clear Screen
-        ctx.fillStyle = timeScale < 1 ? 'rgba(0, 30, 30, 0.5)' : 'rgba(0,0,0,0.2)';
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
         ctx.fillRect(0, 0, w, h);
 
-        if (keys.e) doAbility();
-        if (abilityCD > 0) abilityCD--;
-
-        // Move Player
-        let speed = (keys.shift ? 12 : 7) * timeScale;
-        if (keys.w && player.y > 20) player.y -= speed;
-        if (keys.s && player.y < h-20) player.y += speed;
-        if (keys.a && player.x > 20) player.x -= speed;
-        if (keys.d && player.x < w-20) player.x += speed;
+        // Movement
+        let s = keys.shift ? 10 : 5;
+        if (keys.w) player.y -= s; if (keys.s) player.y += s;
+        if (keys.a) player.x -= s; if (keys.d) player.x += s;
 
         // Draw Player
         ctx.fillStyle = '#0ff';
-        ctx.shadowBlur = 15; ctx.shadowColor = '#0ff';
         ctx.beginPath(); ctx.arc(player.x, player.y, 15, 0, 7); ctx.fill();
-        ctx.shadowBlur = 0;
+
+        // Crosshair
+        ctx.strokeStyle = '#0ff';
+        ctx.beginPath(); ctx.arc(mx, my, 10, 0, 7); ctx.stroke();
 
         // Bullets
         bullets.forEach((b, i) => {
-            b.x += b.vx * timeScale; b.y += b.vy * timeScale;
-            ctx.fillStyle = b.p ? '#ff0' : '#f00';
-            ctx.fillRect(b.x, b.y, b.s, b.s);
+            b.x += b.vx; b.y += b.vy;
+            ctx.fillStyle = '#ff0'; ctx.fillRect(b.x, b.y, 5, 5);
             if (b.x<0 || b.x>w || b.y<0 || b.y>h) bullets.splice(i, 1);
         });
 
         // Enemies
-        if (Math.random() < 0.05) enemies.push({x: Math.random()*w, y: -20, s: 3.5});
+        if (Math.random() < 0.03) enemies.push({x: Math.random()*w, y: -20});
         enemies.forEach((e, i) => {
-            let ang = Math.atan2(player.y - e.y, player.x - e.x);
-            e.x += Math.cos(ang) * e.s * timeScale;
-            e.y += Math.sin(ang) * e.s * timeScale;
-
+            let a = Math.atan2(player.y - e.y, player.x - e.x);
+            e.x += Math.cos(a) * 2.5; e.y += Math.sin(a) * 2.5;
             ctx.fillStyle = '#f0f';
             ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, 7); ctx.fill();
 
-            // Bullet Hit
             bullets.forEach((b, bi) => {
-                if (b.p && Math.hypot(b.x-e.x, b.y-e.y) < 20) {
+                if (Math.hypot(b.x-e.x, b.y-e.y) < 20) {
                     enemies.splice(i, 1); bullets.splice(bi, 1);
-                    score += 10; player.hp = Math.min(100, player.hp + 1);
-                    beep(1000, 'sine', 0.05, 0.05);
+                    score += 10;
                 }
             });
 
-            // Player Hit
             if (Math.hypot(player.x-e.x, player.y-e.y) < 30) {
                 player.hp -= 0.5;
             }
         });
 
-        // Explosions
-        explosions.forEach((ex, i) => {
-            ex.r += 10 * timeScale;
-            ctx.strokeStyle = '#fff'; ctx.lineWidth = 5;
-            ctx.beginPath(); ctx.arc(ex.x, ex.y, ex.r, 0, 7); ctx.stroke();
-            enemies.forEach((e, ei) => {
-                if(Math.hypot(ex.x-e.x, ex.y-e.y) < ex.r) enemies.splice(ei, 1);
-            });
-            if (ex.r > ex.max) explosions.splice(i, 1);
-        });
+        document.getElementById('sc').innerText = score;
+        document.getElementById('am').innerText = player.ammo;
+        document.getElementById('hp-fill').style.width = player.hp + "%";
 
-        // UI
-        scEl.innerText = score;
-        amEl.innerText = player.ammo;
-        hpEl.style.width = player.hp + "%";
-
-        if (player.hp <= 0) {
-            active = false;
-            alert("GAME OVER! SCORE: " + score);
-            location.reload();
-        }
+        if (player.hp <= 0) location.reload();
     }
+};
 </script>
 </body>
 </html>
