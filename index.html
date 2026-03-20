@@ -2,90 +2,133 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Neon Strike</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Strike - High Graphics</title>
     <style>
-        body { margin: 0; background: #000; color: #0ff; font-family: Arial, sans-serif; overflow: hidden; }
-        #menu { 
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-            z-index: 100; background: #111; padding: 50px; border: 5px solid #0ff; text-align: center;
-        }
-        .btn { background: #0ff; color: #000; border: none; padding: 20px; font-weight: bold; cursor: pointer; font-size: 20px; }
-        #stats { position: absolute; top: 10px; left: 10px; z-index: 10; font-size: 20px; }
-        canvas { display: block; }
+        body { margin: 0; background: #000; color: #0ff; font-family: sans-serif; overflow: hidden; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; font-size: 20px; text-shadow: 0 0 10px #0ff; }
+        #msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 20; }
+        .btn { background: #0ff; color: #000; border: none; padding: 15px 30px; font-weight: bold; cursor: pointer; font-size: 24px; border-radius: 5px; box-shadow: 0 0 20px #0ff; }
+        canvas { display: block; position: absolute; top: 0; left: 0; }
     </style>
 </head>
 <body>
-    <div id="stats">Score: 0</div>
-    <div id="menu">
-        <h1>NEON STRIKE</h1>
-        <p>HIGH GRAPHICS ENABLED</p>
-        <button class="btn" onclick="start()">CLICK TO START MISSION</button>
+
+    <div id="ui">SCORE: 0 | AMMO: 10</div>
+    
+    <div id="msg">
+        <h1 style="font-size: 50px; margin-bottom: 10px;">NEON STRIKE</h1>
+        <p style="margin-bottom: 30px;">HIGH GRAPHICS MODE ACTIVE</p>
+        <button class="btn" onclick="init()">START MISSION</button>
     </div>
-    <canvas id="c"></canvas>
+
+    <canvas id="g"></canvas>
 
 <script>
-    const canvas = document.getElementById('c');
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const c = document.getElementById('g');
+    const ctx = c.getContext('2d');
+    const ui = document.getElementById('ui');
+    const msg = document.getElementById('msg');
 
-    let active = false, score = 0, px = canvas.width/2, py = canvas.height/2;
-    let enemies = [], bullets = [], keys = {};
+    let w, h, active = false;
+    let px, py, score = 0, ammo = 10, lastF = 0;
+    let bullets = [], enemies = [], particles = [], keys = {};
 
-    function start() {
-        document.getElementById('menu').style.display = 'none';
+    function resize() {
+        w = c.width = window.innerWidth;
+        h = c.height = window.innerHeight;
+    }
+    window.onresize = resize;
+    resize();
+
+    function init() {
+        msg.style.display = 'none';
+        px = w/2; py = h/2;
         active = true;
-        gameLoop();
+        score = 0;
+        loop();
     }
 
     window.onkeydown = e => keys[e.key.toLowerCase()] = true;
     window.onkeyup = e => keys[e.key.toLowerCase()] = false;
     window.onmousedown = e => {
-        if(!active) return;
+        if(!active || ammo <= 0) return;
         let ang = Math.atan2(e.clientY - py, e.clientX - px);
-        bullets.push({x: px, y: py, vx: Math.cos(ang)*10, vy: Math.sin(ang)*10});
+        bullets.push({x: px, y: py, vx: Math.cos(ang)*15, vy: Math.sin(ang)*15});
+        ammo--;
+        if(ammo === 0) setTimeout(() => ammo = 10, 1000);
     };
 
-    function gameLoop() {
+    function part(x, y, color) {
+        for(let i=0; i<10; i++) {
+            particles.push({x, y, vx:(Math.random()-0.5)*10, vy:(Math.random()-0.5)*10, a:1, c:color});
+        }
+    }
+
+    function loop() {
         if(!active) return;
-        requestAnimationFrame(gameLoop);
+        requestAnimationFrame(loop);
+
+        // Motion Blur
         ctx.fillStyle = 'rgba(0,0,0,0.2)';
-        ctx.fillRect(0,0,canvas.width, canvas.height);
+        ctx.fillRect(0, 0, w, h);
 
         // Move Player
-        if(keys.w) py -= 5; if(keys.s) py += 5;
-        if(keys.a) px -= 5; if(keys.d) px += 5;
+        if(keys.w && py > 20) py -= 5;
+        if(keys.s && py < h-20) py += 5;
+        if(keys.a && px > 20) px -= 5;
+        if(keys.d && px < w-20) px += 5;
 
-        // Draw Player
+        // Draw Player (Glow)
+        ctx.shadowBlur = 15; ctx.shadowColor = '#0ff';
         ctx.fillStyle = '#0ff';
         ctx.beginPath(); ctx.arc(px, py, 15, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Particles
+        particles.forEach((p, i) => {
+            p.x += p.vx; p.y += p.vy; p.a -= 0.02;
+            ctx.globalAlpha = p.a;
+            ctx.fillStyle = p.c;
+            ctx.fillRect(p.x, p.y, 3, 3);
+            if(p.a <= 0) particles.splice(i, 1);
+        });
+        ctx.globalAlpha = 1;
 
         // Bullets
         bullets.forEach((b, i) => {
             b.x += b.vx; b.y += b.vy;
             ctx.fillStyle = '#ff0';
-            ctx.fillRect(b.x, b.y, 5, 5);
-            if(b.x < 0 || b.x > canvas.width) bullets.splice(i, 1);
+            ctx.fillRect(b.x, b.y, 4, 4);
+            if(b.x < 0 || b.x > w || b.y < 0 || b.y > h) bullets.splice(i, 1);
         });
 
         // Enemies
-        if(Math.random() < 0.05) enemies.push({x: Math.random()*canvas.width, y: -20});
+        if(Math.random() < 0.04) enemies.push({x: Math.random()*w, y: -20, s: 2 + Math.random()*2});
         enemies.forEach((e, i) => {
-            e.y += 3;
-            ctx.fillStyle = 'red';
-            ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI*2); ctx.fill();
+            let ang = Math.atan2(py-e.y, px-e.x);
+            e.x += Math.cos(ang)*e.s; e.y += Math.sin(ang)*e.s;
             
-            // Hit detection
+            ctx.fillStyle = '#f00';
+            ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI*2); ctx.fill();
+
+            // Collision
             bullets.forEach((b, bi) => {
-                if(Math.hypot(b.x - e.x, b.y - e.y) < 20) {
+                if(Math.hypot(b.x-e.x, b.y-e.y) < 20) {
+                    part(e.x, e.y, '#f00');
                     enemies.splice(i, 1); bullets.splice(bi, 1);
                     score += 10;
-                    document.getElementById('stats').innerText = "Score: " + score;
                 }
             });
-            if(e.y > canvas.height) enemies.splice(i, 1);
-            if(Math.hypot(px-e.x, py-e.y) < 30) location.reload();
+
+            if(Math.hypot(px-e.x, py-e.y) < 30) {
+                active = false;
+                msg.style.display = 'block';
+                msg.innerHTML = `<h1>GAME OVER</h1><p>SCORE: ${score}</p><button class="btn" onclick="location.reload()">RETRY</button>`;
+            }
         });
+
+        ui.innerText = `SCORE: ${score} | AMMO: ${ammo}`;
     }
 </script>
 </body>
