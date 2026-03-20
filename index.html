@@ -3,14 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Strike - Extreme Edition</title>
+    <title>Neon Strike - Healing Edition</title>
     <style>
-        body { margin: 0; background: #000; color: #0ff; font-family: sans-serif; overflow: hidden; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; font-size: 20px; text-shadow: 0 0 10px #0ff; width: 100%; }
-        #hp-container { width: 200px; height: 20px; background: #333; border: 2px solid #0ff; margin-top: 10px; }
-        #hp-bar { width: 100%; height: 100%; background: #0ff; transition: 0.2s; box-shadow: 0 0 10px #0ff; }
-        #msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 20; background: rgba(0,0,0,0.9); padding: 40px; border: 2px solid #0ff; }
-        .btn { background: #0ff; color: #000; border: none; padding: 15px 30px; font-weight: bold; cursor: pointer; font-size: 20px; border-radius: 5px; margin: 5px; width: 200px; }
+        body { margin: 0; background: #000; color: #0ff; font-family: 'Arial Black', sans-serif; overflow: hidden; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; font-size: 20px; text-shadow: 0 0 10px #0ff; width: 300px; }
+        #hp-container, #boss-hp-container { width: 250px; height: 15px; background: #222; border: 1px solid #0ff; margin-top: 5px; }
+        #hp-bar { width: 100%; height: 100%; background: #0f0; box-shadow: 0 0 10px #0f0; transition: 0.3s; }
+        #boss-hp-bar { width: 100%; height: 100%; background: #f00; box-shadow: 0 0 10px #f00; display:none; }
+        #msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 20; background: rgba(0,0,0,0.95); padding: 40px; border: 3px solid #0ff; }
+        .btn { background: #0ff; color: #000; border: none; padding: 15px 30px; font-weight: bold; cursor: pointer; font-size: 20px; margin: 10px; width: 220px; }
         canvas { display: block; position: absolute; top: 0; left: 0; }
     </style>
 </head>
@@ -18,8 +19,12 @@
 
     <div id="ui">
         SCORE: <span id="sc">0</span> | AMMO: <span id="am">10</span>
+        <div style="color:#0f0">HP [LIFE STEAL ACTIVE]</div>
         <div id="hp-container"><div id="hp-bar"></div></div>
-        <small>[E] ABILITY READY</small>
+        <div id="boss-ui" style="display:none; margin-top:10px;">
+            BOSS HP
+            <div id="boss-hp-container"><div id="boss-hp-bar"></div></div>
+        </div>
     </div>
     
     <div id="msg">
@@ -35,82 +40,59 @@
     const ctx = c.getContext('2d');
     const msg = document.getElementById('msg');
     const hpBar = document.getElementById('hp-bar');
+    const bHpBar = document.getElementById('boss-hp-bar');
 
     let w, h, active = false, audioCtx;
     let px, py, score = 0, ammo = 10, hp = 100, abilityCD = 0;
-    let bullets = [], enemies = [], particles = [], explosions = [], keys = {};
-    let gunType = 'AR';
+    let bullets = [], enemies = [], heals = [], particles = [], explosions = [], keys = {};
+    let gunType = 'AR', boss = null, bossPhase = false;
 
     function resize() { w = c.width = window.innerWidth; h = c.height = window.innerHeight; }
     window.onresize = resize; resize();
 
-    // --- AUDIO ENGINE ---
-    function playSound(freq, type, duration, vol, slide = false) {
+    function playSound(freq, type, duration, vol) {
         if(!audioCtx) return;
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = type;
         osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        if(slide) osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + duration);
         gain.gain.setValueAtTime(vol, audioCtx.currentTime);
         gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration);
         osc.connect(gain); gain.connect(audioCtx.destination);
         osc.start(); osc.stop(audioCtx.currentTime + duration);
     }
 
-    function startMusic() {
-        setInterval(() => { if(active) playSound(110, 'triangle', 0.2, 0.03); }, 400); // Bass pulse
-    }
-
     function init(type) {
         gunType = type;
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         msg.style.display = 'none';
-        px = w/2; py = h/2;
-        hp = 100; score = 0; active = true;
-        startMusic();
+        px = w/2; py = h*0.8; hp = 100; score = 0; active = true; bossPhase = false; boss = null;
         loop();
     }
 
-    window.onkeydown = e => {
-        keys[e.key.toLowerCase()] = true;
-        if(e.key.toLowerCase() === 'e' && abilityCD <= 0) useAbility();
-    };
+    window.onkeydown = e => keys[e.key.toLowerCase()] = true;
     window.onkeyup = e => keys[e.key.toLowerCase()] = false;
-
+    
     window.onmousedown = e => {
         if(!active || ammo <= 0) return;
         let ang = Math.atan2(e.clientY - py, e.clientX - px);
-        
         if(gunType === 'AR') {
-            playSound(400, 'sawtooth', 0.1, 0.1, true);
-            bullets.push({x: px, y: py, vx: Math.cos(ang)*18, vy: Math.sin(ang)*18, s:4});
+            playSound(400, 'sawtooth', 0.1, 0.1);
+            bullets.push({x: px, y: py, vx: Math.cos(ang)*20, vy: Math.sin(ang)*20, s:4, owner:'p'});
             ammo--;
         } else {
-            playSound(200, 'sawtooth', 0.2, 0.15, true);
-            for(let i=-2; i<=2; i++) { // Shotgun spread
-                bullets.push({x: px, y: py, vx: Math.cos(ang + i*0.1)*12, vy: Math.sin(ang + i*0.1)*12, s:6});
-            }
+            playSound(200, 'sawtooth', 0.2, 0.1);
+            for(let i=-2; i<=2; i++) bullets.push({x: px, y: py, vx: Math.cos(ang + i*0.1)*14, vy: Math.sin(ang + i*0.1)*14, s:6, owner:'p'});
             ammo -= 2;
         }
-        if(ammo <= 0) setTimeout(() => ammo = 10, 1000);
+        if(ammo <= 0) setTimeout(() => ammo = 10, 800);
     };
 
     function useAbility() {
-        abilityCD = 240;
-        if(gunType === 'SG') { // Explosion
-            playSound(50, 'square', 0.5, 0.3);
-            explosions.push({x: px, y: py, r: 0, life: 30});
-        } else { // Dash
-            playSound(800, 'sine', 0.2, 0.2);
-            let ang = Math.atan2((keys.s?1:0)-(keys.w?1:0), (keys.d?1:0)-(keys.a?1:0));
-            if(!keys.w && !keys.s && !keys.a && !keys.d) ang = 0; 
-            px += Math.cos(ang) * 150; py += Math.sin(ang) * 150;
-        }
-    }
-
-    function part(x, y, color) {
-        for(let i=0; i<10; i++) particles.push({x, y, vx:(Math.random()-0.5)*10, vy:(Math.random()-0.5)*10, a:1, c:color});
+        if(abilityCD > 0) return;
+        abilityCD = 200;
+        if(gunType === 'SG') explosions.push({x: px, y: py, r: 0, life: 30});
+        else { px += (keys.d?1:keys.a?-1:0)*250; py += (keys.s?1:keys.w?-1:0)*250; playSound(800, 'sine', 0.2, 0.1); }
     }
 
     function loop() {
@@ -118,72 +100,83 @@
         requestAnimationFrame(loop);
         ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(0, 0, w, h);
 
+        if(keys.e) useAbility();
+        if(score >= 500 && !bossPhase) { 
+            bossPhase = true; 
+            document.getElementById('boss-ui').style.display = 'block';
+            bHpBar.style.display = 'block';
+            boss = { x: w/2, y: -100, hp: 1000, maxHp: 1000, timer: 0 };
+        }
         if(abilityCD > 0) abilityCD--;
 
-        let speed = keys.shift ? 9 : 5;
+        let speed = keys.shift ? 10 : 6;
         if(keys.w && py > 20) py -= speed; if(keys.s && py < h-20) py += speed;
         if(keys.a && px > 20) px -= speed; if(keys.d && px < w-20) px += speed;
 
         // Player
-        ctx.shadowBlur = 15; ctx.shadowColor = '#0ff';
-        ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.arc(px, py, 15, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 15; ctx.shadowColor = '#0f0';
+        ctx.fillStyle = '#0f0'; ctx.beginPath(); ctx.arc(px, py, 15, 0, Math.PI*2); ctx.fill();
         ctx.shadowBlur = 0;
 
-        // Explosions
-        explosions.forEach((ex, i) => {
-            ex.r += 6; ex.life--;
-            ctx.strokeStyle = '#0ff'; ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.arc(ex.x, ex.y, ex.r, 0, Math.PI*2); ctx.stroke();
-            enemies.forEach((e, ei) => {
-                if(Math.hypot(ex.x-e.x, ex.y-e.y) < ex.r + 20) {
-                    part(e.x, e.y, '#f00'); enemies.splice(ei, 1); score += 20;
-                }
-            });
-            if(ex.life <= 0) explosions.splice(i, 1);
+        // Health Packs (Spawn during Boss)
+        if(bossPhase && Math.random() < 0.005) heals.push({x: Math.random()*w, y: Math.random()*h});
+        heals.forEach((hPack, i) => {
+            ctx.fillStyle = '#0f0'; ctx.shadowBlur = 10; ctx.shadowColor = '#0f0';
+            ctx.beginPath(); ctx.arc(hPack.x, hPack.y, 10, 0, 7); ctx.fill();
+            if(Math.hypot(px-hPack.x, py-hPack.y) < 25) {
+                hp = Math.min(100, hp + 25);
+                playSound(1200, 'sine', 0.3, 0.1);
+                heals.splice(i, 1);
+            }
         });
+
+        // Boss
+        if(boss) {
+            if(boss.y < 150) boss.y += 2;
+            ctx.fillStyle = '#f00'; ctx.beginPath(); ctx.arc(boss.x, boss.y, 80, 0, 7); ctx.fill();
+            boss.timer++;
+            if(boss.timer % 60 === 0) {
+                for(let i=0; i<12; i++) {
+                    let a = (Math.PI*2/12)*i;
+                    bullets.push({x: boss.x, y: boss.y, vx: Math.cos(a)*7, vy: Math.sin(a)*7, s:10, owner:'e'});
+                }
+            }
+        }
 
         // Bullets
         bullets.forEach((b, i) => {
             b.x += b.vx; b.y += b.vy;
-            ctx.fillStyle = '#ff0'; ctx.fillRect(b.x, b.y, b.s, b.s);
+            ctx.fillStyle = b.owner === 'p' ? '#ff0' : '#f00';
+            ctx.fillRect(b.x, b.y, b.s, b.s);
+
+            if(b.owner === 'p' && boss && Math.hypot(b.x-boss.x, b.y-boss.y) < 80) {
+                boss.hp -= 10; bullets.splice(i, 1);
+                bHpBar.style.width = (boss.hp/boss.maxHp)*100 + "%";
+            }
+            if(b.owner === 'e' && Math.hypot(b.x-px, b.y-py) < 20) { hp -= 8; bullets.splice(i, 1); }
             if(b.x < 0 || b.x > w || b.y < 0 || b.y > h) bullets.splice(i, 1);
         });
 
-        // Enemies
-        if(Math.random() < 0.05) enemies.push({x: Math.random()*w, y: -20, s: 2.5 + Math.random()*2});
+        // Enemies & Life Steal
+        if(!bossPhase && Math.random() < 0.04) enemies.push({x: Math.random()*w, y: -20, s: 3});
         enemies.forEach((e, i) => {
             let ang = Math.atan2(py-e.y, px-e.x);
             e.x += Math.cos(ang)*e.s; e.y += Math.sin(ang)*e.s;
-            ctx.fillStyle = '#f00'; ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI*2); ctx.fill();
-
+            ctx.fillStyle = '#f0f'; ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, 7); ctx.fill();
+            if(Math.hypot(px-e.x, py-e.y) < 30) hp -= 0.5;
             bullets.forEach((b, bi) => {
-                if(Math.hypot(b.x-e.x, b.y-e.y) < 20) {
-                    playSound(1000, 'sine', 0.05, 0.05);
-                    part(e.x, e.y, '#f00'); enemies.splice(i, 1); bullets.splice(bi, 1); score += 10;
+                if(b.owner === 'p' && Math.hypot(b.x-e.x, b.y-e.y) < 20) {
+                    enemies.splice(i, 1); bullets.splice(bi, 1);
+                    score += 10;
+                    hp = Math.min(100, hp + 2); // LIFE STEAL: Heal +2 on every kill
                 }
             });
-
-            if(Math.hypot(px-e.x, py-e.y) < 30) {
-                hp -= 1;
-                hpBar.style.width = hp + "%";
-                if(hp <= 0) {
-                    active = false;
-                    msg.style.display = 'block';
-                    msg.innerHTML = `<h1>WASTED</h1><p>SCORE: ${score}</p><button class="btn" onclick="location.reload()">RETRY</button>`;
-                }
-            }
         });
 
-        // Particles
-        particles.forEach((p, i) => {
-            p.x += p.vx; p.y += p.vy; p.a -= 0.02;
-            ctx.globalAlpha = p.a; ctx.fillStyle = p.c; ctx.fillRect(p.x, p.y, 3, 3);
-            if(p.a <= 0) particles.splice(i, 1);
-        });
-        ctx.globalAlpha = 1;
-
+        hpBar.style.width = hp + "%";
         document.getElementById('sc').innerText = score;
         document.getElementById('am').innerText = ammo;
+        if(hp <= 0) location.reload();
     }
 </script>
 </body>
