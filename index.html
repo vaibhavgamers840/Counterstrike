@@ -1,173 +1,198 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>Neon Strike - Ultimate Fix</title>
+    <title>Neon Strike - 2D Extreme</title>
     <style>
-        body { margin: 0; background: #000; color: #0ff; font-family: 'Arial Black', sans-serif; overflow: hidden; }
-        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
-        #hp-container { width: 250px; height: 12px; background: #222; border: 1px solid #0ff; margin-top: 5px; }
-        #hp-bar { width: 100%; height: 100%; background: #0f0; transition: 0.2s; }
-        #msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 20; background: rgba(0,0,0,0.9); padding: 40px; border: 3px solid #0ff; }
-        .btn { background: #0ff; color: #000; border: none; padding: 15px 30px; font-weight: bold; cursor: pointer; font-size: 20px; margin: 10px; width: 250px; }
-        .gold { color: #ff0; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; color: #0ff; font-family: sans-serif; overflow: hidden; }
+        #game-ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
+        #hp-bg { width: 200px; height: 15px; background: #222; border: 1px solid #0ff; margin-top: 5px; }
+        #hp-fill { width: 100%; height: 100%; background: #0f0; transition: 0.1s; }
+        #menu { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            z-index: 20; text-align: center; background: rgba(0,0,0,0.9); 
+            padding: 50px; border: 2px solid #0ff; box-shadow: 0 0 20px #0ff; 
+        }
+        .btn { 
+            background: #0ff; color: #000; border: none; padding: 15px 40px; 
+            font-weight: bold; cursor: pointer; font-size: 20px; margin: 10px; width: 280px;
+        }
+        canvas { display: block; background: #000; }
     </style>
 </head>
 <body>
 
-    <div id="ui">
-        HIGH SCORE: <span id="hs">0</span><br>
+    <div id="game-ui">
         SCORE: <span id="sc">0</span> | AMMO: <span id="am">10</span>
-        <div id="hp-container"><div id="hp-bar"></div></div>
-    </div>
-    
-    <div id="msg">
-        <h1 style="font-size: 50px;">NEON STRIKE</h1>
-        <button class="btn" onclick="init('AR')">ASSAULT (Dash)</button><br>
-        <button class="btn" onclick="init('SG')">SHOTGUN (Explode)</button>
+        <div id="hp-bg"><div id="hp-fill"></div></div>
+        <small id="status">PRESS [E] FOR ABILITY</small>
     </div>
 
-    <canvas id="g"></canvas>
+    <div id="menu">
+        <h1 style="font-size: 50px; margin-bottom: 20px;">NEON STRIKE</h1>
+        <button class="btn" onclick="startGame('AR')">ASSAULT (Dash Ability)</button><br>
+        <button class="btn" onclick="startGame('SG')">SHOTGUN (Explode Ability)</button>
+    </div>
+
+    <canvas id="canvas"></canvas>
 
 <script>
-    const c = document.getElementById('g');
-    const ctx = c.getContext('2d');
-    const msg = document.getElementById('msg');
-    const hpBar = document.getElementById('hp-bar');
-    const hsDisplay = document.getElementById('hs');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const scEl = document.getElementById('sc');
+    const amEl = document.getElementById('am');
+    const hpEl = document.getElementById('hp-fill');
+    const menu = document.getElementById('menu');
 
-    let w, h, active = false, audioCtx = null;
-    let px, py, score = 0, ammo = 10, hp = 100, abilityCD = 0;
-    let bullets = [], enemies = [], explosions = [], powerups = [], keys = {};
-    let gunType = 'AR', boss = null, bossPhase = false, timeScale = 1;
+    let w, h, player, active = false, audioCtx = null;
+    let bullets = [], enemies = [], explosions = [], keys = {};
+    let score = 0, gun = 'AR', abilityCD = 0, timeScale = 1;
 
-    // Load High Score
-    hsDisplay.innerText = localStorage.getItem('neon_hs') || 0;
+    function resize() {
+        w = canvas.width = window.innerWidth;
+        h = canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
 
-    function resize() { w = c.width = window.innerWidth; h = c.height = window.innerHeight; }
-    window.onresize = resize; resize();
-
-    function playSound(freq, type, duration, vol) {
-        if(!audioCtx) return;
-        try {
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = type;
-            osc.frequency.setValueAtTime(freq * timeScale, audioCtx.currentTime);
-            gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            osc.start(); osc.stop(audioCtx.currentTime + duration);
-        } catch(e) {}
+    // FAIL-SAFE AUDIO
+    function beep(freq, type, dur, vol) {
+        if (!audioCtx) return;
+        const v = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        v.type = type;
+        v.frequency.setValueAtTime(freq * timeScale, audioCtx.currentTime);
+        g.gain.setValueAtTime(vol, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+        v.connect(g); g.connect(audioCtx.destination);
+        v.start(); v.stop(audioCtx.currentTime + dur);
     }
 
-    function init(type) {
-        gunType = type;
-        // Start Audio Context on User Click
-        if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        msg.style.display = 'none';
-        px = w/2; py = h*0.8; hp = 100; score = 0; ammo = 10;
-        bullets = []; enemies = []; explosions = []; active = true;
+    function startGame(type) {
+        gun = type;
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        menu.style.display = 'none';
+        player = { x: w/2, y: h-100, hp: 100, ammo: 10 };
+        score = 0; bullets = []; enemies = []; explosions = [];
+        active = true;
         
-        // Background Music Loop
-        setInterval(() => { if(active) playSound(110, 'triangle', 0.4, 0.05); }, 500);
-        
-        loop();
+        // Music interval
+        setInterval(() => { if(active) beep(80, 'triangle', 0.5, 0.05); }, 500);
+        update();
     }
 
     window.onkeydown = e => keys[e.key.toLowerCase()] = true;
     window.onkeyup = e => keys[e.key.toLowerCase()] = false;
 
     window.onmousedown = e => {
-        if(!active || ammo <= 0) return;
-        let ang = Math.atan2(e.clientY - py, e.clientX - px);
-        if(gunType === 'AR') {
-            bullets.push({x: px, y: py, vx: Math.cos(ang)*20, vy: Math.sin(ang)*20, s:4, owner:'p'});
-            if(ammo < 100) ammo--;
-            playSound(400, 'sawtooth', 0.1, 0.1);
+        if (!active || player.ammo <= 0) return;
+        const ang = Math.atan2(e.clientY - player.y, e.clientX - player.x);
+        if (gun === 'AR') {
+            bullets.push({x: player.x, y: player.y, vx: Math.cos(ang)*20, vy: Math.sin(ang)*20, s:4, p:true});
+            player.ammo--;
+            beep(400, 'sawtooth', 0.1, 0.1);
         } else {
-            for(let i=-2; i<=2; i++) bullets.push({x: px, y: py, vx: Math.cos(ang+i*0.1)*14, vy: Math.sin(ang+i*0.1)*14, s:6, owner:'p'});
-            if(ammo < 100) ammo -= 2;
-            playSound(200, 'sawtooth', 0.2, 0.1);
+            for(let i=-2; i<=2; i++) bullets.push({x: player.x, y: player.y, vx: Math.cos(ang+i*0.15)*15, vy: Math.sin(ang+i*0.15)*15, s:6, p:true});
+            player.ammo -= 2;
+            beep(200, 'sawtooth', 0.2, 0.1);
         }
-        if(ammo <= 0) setTimeout(() => ammo = 10, 800);
+        if (player.ammo <= 0) setTimeout(() => player.ammo = 10, 800);
     };
 
-    function useAbility() {
-        if(abilityCD > 0) return;
+    function doAbility() {
+        if (abilityCD > 0) return;
         abilityCD = 300;
-        timeScale = 0.3; // Bullet Time!
+        timeScale = 0.4; // SLOW MO
         setTimeout(() => timeScale = 1, 2000);
 
-        if(gunType === 'SG') {
-            bullets.push({x: px, y: py, vx: 0, vy: -10, s:12, owner:'p', explosive: true});
-            playSound(80, 'square', 0.5, 0.3);
+        if (gun === 'SG') {
+            explosions.push({x: player.x, y: player.y, r: 0, max: 250});
+            beep(60, 'square', 0.6, 0.3);
         } else {
             let dx = (keys.d?1:0)-(keys.a?1:0);
             let dy = (keys.s?1:0)-(keys.w?1:0);
-            px += dx * 300; py += dy * 300;
-            playSound(800, 'sine', 0.2, 0.2);
+            player.x += dx * 300; player.y += dy * 300;
+            beep(800, 'sine', 0.2, 0.2);
         }
     }
 
-    function loop() {
-        if(!active) return;
-        requestAnimationFrame(loop);
+    function update() {
+        if (!active) return;
+        requestAnimationFrame(update);
 
-        ctx.fillStyle = timeScale < 1 ? 'rgba(0, 20, 20, 0.4)' : 'rgba(0,0,0,0.2)';
+        // Clear Screen
+        ctx.fillStyle = timeScale < 1 ? 'rgba(0, 30, 30, 0.5)' : 'rgba(0,0,0,0.2)';
         ctx.fillRect(0, 0, w, h);
 
-        if(keys.e) useAbility();
-        if(abilityCD > 0) abilityCD--;
+        if (keys.e) doAbility();
+        if (abilityCD > 0) abilityCD--;
 
-        let speed = (keys.shift ? 10 : 6) * timeScale;
-        if(keys.w && py > 20) py -= speed; if(keys.s && py < h-20) py += speed;
-        if(keys.a && px > 20) px -= speed; if(keys.d && px < w-20) px += speed;
+        // Move Player
+        let speed = (keys.shift ? 12 : 7) * timeScale;
+        if (keys.w && player.y > 20) player.y -= speed;
+        if (keys.s && player.y < h-20) player.y += speed;
+        if (keys.a && player.x > 20) player.x -= speed;
+        if (keys.d && player.x < w-20) player.x += speed;
 
-        // Player
-        ctx.fillStyle = ammo > 50 ? '#ff0' : '#0f0';
-        ctx.beginPath(); ctx.arc(px, py, 15, 0, 7); ctx.fill();
+        // Draw Player
+        ctx.fillStyle = '#0ff';
+        ctx.shadowBlur = 15; ctx.shadowColor = '#0ff';
+        ctx.beginPath(); ctx.arc(player.x, player.y, 15, 0, 7); ctx.fill();
+        ctx.shadowBlur = 0;
 
         // Bullets
         bullets.forEach((b, i) => {
             b.x += b.vx * timeScale; b.y += b.vy * timeScale;
-            ctx.fillStyle = b.owner === 'p' ? '#ff0' : '#f00';
+            ctx.fillStyle = b.p ? '#ff0' : '#f00';
             ctx.fillRect(b.x, b.y, b.s, b.s);
-            if(b.x < 0 || b.x > w || b.y < 0 || b.y > h) bullets.splice(i, 1);
+            if (b.x<0 || b.x>w || b.y<0 || b.y>h) bullets.splice(i, 1);
         });
 
         // Enemies
-        if(Math.random() < 0.04) enemies.push({x: Math.random()*w, y: -20, s: 3});
+        if (Math.random() < 0.05) enemies.push({x: Math.random()*w, y: -20, s: 3.5});
         enemies.forEach((e, i) => {
-            let ang = Math.atan2(py-e.y, px-e.x);
-            e.x += Math.cos(ang) * e.s * timeScale; e.y += Math.sin(ang) * e.s * timeScale;
+            let ang = Math.atan2(player.y - e.y, player.x - e.x);
+            e.x += Math.cos(ang) * e.s * timeScale;
+            e.y += Math.sin(ang) * e.s * timeScale;
+
             ctx.fillStyle = '#f0f';
             ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, 7); ctx.fill();
 
+            // Bullet Hit
             bullets.forEach((b, bi) => {
-                if(b.owner === 'p' && Math.hypot(b.x-e.x, b.y-e.y) < 20) {
+                if (b.p && Math.hypot(b.x-e.x, b.y-e.y) < 20) {
                     enemies.splice(i, 1); bullets.splice(bi, 1);
-                    score += 10; hp = Math.min(100, hp + 2);
+                    score += 10; player.hp = Math.min(100, player.hp + 1);
+                    beep(1000, 'sine', 0.05, 0.05);
                 }
             });
 
-            if(Math.hypot(px-e.x, py-e.y) < 30) hp -= 0.5;
+            // Player Hit
+            if (Math.hypot(player.x-e.x, player.y-e.y) < 30) {
+                player.hp -= 0.5;
+            }
         });
 
-        // Boss trigger
-        if(score >= 500 && !bossPhase) {
-            bossPhase = true;
-            // Simplified boss for stability
-            enemies.push({x: w/2, y: 100, s: 1, boss: true, hp: 500});
-        }
+        // Explosions
+        explosions.forEach((ex, i) => {
+            ex.r += 10 * timeScale;
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.arc(ex.x, ex.y, ex.r, 0, 7); ctx.stroke();
+            enemies.forEach((e, ei) => {
+                if(Math.hypot(ex.x-e.x, ex.y-e.y) < ex.r) enemies.splice(ei, 1);
+            });
+            if (ex.r > ex.max) explosions.splice(i, 1);
+        });
 
-        hpBar.style.width = hp + "%";
-        document.getElementById('sc').innerText = score;
-        document.getElementById('am').innerText = ammo;
+        // UI
+        scEl.innerText = score;
+        amEl.innerText = player.ammo;
+        hpEl.style.width = player.hp + "%";
 
-        if(hp <= 0) {
-            if(score > (localStorage.getItem('neon_hs') || 0)) localStorage.setItem('neon_hs', score);
+        if (player.hp <= 0) {
+            active = false;
+            alert("GAME OVER! SCORE: " + score);
             location.reload();
         }
     }
