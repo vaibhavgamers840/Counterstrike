@@ -1,134 +1,193 @@
-<style>
-    body { margin: 0; background: #050505; color: #fff; font-family: 'Orbitron', sans-serif; overflow: hidden; }
-    canvas { display: block; filter: contrast(1.2) brightness(1.1); }
-    #ui { position: absolute; top: 20px; left: 20px; pointer-events: none; z-index: 5; }
-    #combo-container { 
-        position: absolute; top: 20px; right: 20px; text-align: right; 
-        font-size: 2rem; font-weight: bold; color: #ffcc00; text-shadow: 0 0 10px #ffcc00;
-    }
-    #menu, #shop { 
-        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        background: rgba(10, 10, 20, 0.95); padding: 50px; border: 1px solid #00f2ff; 
-        text-align: center; border-radius: 5px; box-shadow: 0 0 30px #00f2ff33;
-    }
-    .btn { 
-        background: #111; color: #00f2ff; border: 1px solid #00f2ff;
-        padding: 15px 30px; cursor: pointer; text-transform: uppercase; letter-spacing: 2px;
-        transition: 0.2s; margin: 10px;
-    }
-    .btn:hover { background: #00f2ff; color: #000; box-shadow: 0 0 20px #00f2ff; }
-</style>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Strike: Github Edition</title>
+    <style>
+        /* Essential CSS to ensure UI stays visible */
+        body { margin: 0; background: #050505; color: #fff; font-family: sans-serif; overflow: hidden; }
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        #ui-layer { position: relative; z-index: 10; pointer-events: none; padding: 20px; }
+        #combo-container { position: absolute; top: 20px; right: 20px; font-size: 24px; color: #ffcc00; }
 
-<div id="combo-container">COMBO x1</div>
+        #menu { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(10, 10, 30, 0.95); padding: 40px; border: 3px solid #00f2ff; 
+            text-align: center; border-radius: 15px; z-index: 100; pointer-events: auto;
+            box-shadow: 0 0 50px rgba(0, 242, 255, 0.3);
+            min-width: 300px;
+        }
+
+        .btn { 
+            background: #111; color: #00f2ff; border: 1px solid #00f2ff;
+            padding: 10px 15px; cursor: pointer; text-transform: uppercase;
+            margin: 5px; transition: 0.2s; font-weight: bold;
+        }
+        .btn:hover { background: #00f2ff; color: #000; }
+        .selected { background: #00f2ff !important; color: #000 !important; box-shadow: 0 0 15px #00f2ff; }
+        .hidden { display: none !important; }
+        h3 { margin-bottom: 10px; color: #aaa; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer" class="hidden">
+        <h2 id="stats">Score: 0 | Level: 1 | Ammo: --</h2>
+        <div id="combo-container">COMBO x1</div>
+    </div>
+
+    <div id="menu">
+        <h1 style="color:#00f2ff; margin-top:0;">NEON STRIKE</h1>
+        
+        <h3>1. SELECT HERO</h3>
+        <button class="btn" id="h-ghost" onclick="setHero('ghost')">GHOST (Fast)</button>
+        <button class="btn" id="h-tank" onclick="setHero('tank')">TANK (Strong)</button>
+        <button class="btn" id="h-ninja" onclick="setHero('ninja')">NINJA (Dash)</button>
+
+        <h3>2. SELECT WEAPON</h3>
+        <button class="btn" id="g-ar" onclick="setGun('ar')">ASSAULT RIFLE</button>
+        <button class="btn" id="g-shotgun" onclick="setGun('shotgun')">SHOTGUN</button>
+        <button class="btn" id="g-sniper" onclick="setGun('sniper')">SNIPER</button>
+
+        <br><br>
+        <button class="btn" style="width:100%; background:#00f2ff; color:#000; font-size:18px;" onclick="checkStart()">START GAME</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
 
 <script>
-    // --- HIGH GRAPHICS CONFIG ---
-    let particles = [];
-    let shakeIntensity = 0;
-    let combo = 1;
-    let comboTimer = 0;
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-    class Particle {
-        constructor(x, y, color) {
-            this.x = x; this.y = y;
-            this.v = { x: (Math.random() - 0.5) * 8, y: (Math.random() - 0.5) * 8 };
-            this.alpha = 1;
-            this.color = color;
-        }
-        draw() {
-            ctx.globalAlpha = this.alpha;
-            ctx.fillStyle = this.color;
-            ctx.fillRect(this.x, this.y, 3, 3);
-            ctx.globalAlpha = 1;
-        }
-        update() {
-            this.x += this.v.x; this.y += this.v.y;
-            this.alpha -= 0.02;
+    let gameActive = false, isMouseDown = false;
+    let score = 0, level = 1, combo = 1, comboTimer = 0, ammo = 0, maxAmmo = 0;
+    let selectedHero = null, selectedGun = null, lastFireTime = 0;
+    let projectiles = [], enemies = [], particles = [], player = null;
+    let mouseX = 0, mouseY = 0, reloadTime = 1000;
+
+    const weaponData = {
+        ar: { rof: 120, spread: 0.1, count: 1, ammo: 30, reload: 1000, color: '#ffff00' },
+        shotgun: { rof: 800, spread: 0.4, count: 6, ammo: 8, reload: 1500, color: '#ffaa00' },
+        sniper: { rof: 1200, spread: 0, count: 1, ammo: 5, reload: 2000, color: '#00ccff' }
+    };
+
+    function setHero(h) {
+        selectedHero = h;
+        document.querySelectorAll('#menu button').forEach(b => { if(b.id.startsWith('h-')) b.classList.remove('selected'); });
+        document.getElementById('h-'+h).classList.add('selected');
+    }
+
+    function setGun(g) {
+        selectedGun = g;
+        document.querySelectorAll('#menu button').forEach(b => { if(b.id.startsWith('g-')) b.classList.remove('selected'); });
+        document.getElementById('g-'+g).classList.add('selected');
+    }
+
+    function checkStart() {
+        if(selectedHero && selectedGun) {
+            document.getElementById('menu').classList.add('hidden');
+            document.getElementById('ui-layer').classList.remove('hidden');
+            initGame();
+        } else {
+            alert("Please select a Hero AND a Weapon first!");
         }
     }
 
-    function createExplosion(x, y, color, count = 10) {
-        for(let i = 0; i < count; i++) particles.push(new Particle(x, y, color));
-        shakeIntensity = count / 2;
+    function initGame() {
+        const gun = weaponData[selectedGun];
+        maxAmmo = gun.ammo + (selectedHero === 'ghost' ? 15 : 0);
+        ammo = maxAmmo;
+        player = {
+            x: canvas.width/2, y: canvas.height/2, r: 15,
+            speed: (selectedHero === 'ghost') ? 6 : (selectedHero === 'tank') ? 3.5 : 5,
+            color: (selectedHero === 'ghost') ? '#00ffcc' : (selectedHero === 'tank') ? '#ff4444' : '#bb00ff'
+        };
+        gameActive = true;
+        animate(0);
     }
 
-    // --- ENHANCED ANIMATION LOOP ---
+    window.onmousemove = e => { mouseX = e.clientX; mouseY = e.clientY; };
+    window.onmousedown = () => isMouseDown = true;
+    window.onmouseup = () => isMouseDown = false;
+    const keys = {};
+    window.onkeydown = e => keys[e.key.toLowerCase()] = true;
+    window.onkeyup = e => keys[e.key.toLowerCase()] = false;
+
+    function fire() {
+        const gun = weaponData[selectedGun];
+        if(Date.now() - lastFireTime < gun.rof || ammo <= 0) return;
+        const ang = Math.atan2(mouseY - player.y, mouseX - player.x);
+        for(let i=0; i<gun.count; i++) {
+            projectiles.push({
+                x: player.x, y: player.y,
+                v: { x: Math.cos(ang+(Math.random()-0.5)*gun.spread)*15, y: Math.sin(ang+(Math.random()-0.5)*gun.spread)*15 },
+                r: 4, color: gun.color
+            });
+        }
+        ammo--; lastFireTime = Date.now();
+        if(ammo === 0) setTimeout(() => { ammo = maxAmmo; }, gun.reload);
+    }
+
+    let lastSpawn = 0;
     function animate(t) {
-        if(!gameActive || inShop) { requestAnimationFrame(animate); return; }
+        if(!gameActive) return;
         requestAnimationFrame(animate);
 
-        // --- Screen Shake Logic ---
-        let sx = (Math.random() - 0.5) * shakeIntensity;
-        let sy = (Math.random() - 0.5) * shakeIntensity;
-        ctx.setTransform(1, 0, 0, 1, sx, sy);
-        if(shakeIntensity > 0) shakeIntensity *= 0.9;
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(0,0,canvas.width, canvas.height);
 
-        // Dark Background Trail
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-        ctx.fillRect(-100, -100, canvas.width + 200, canvas.height + 200);
+        // Player Move
+        if(keys['w'] && player.y > player.r) player.y -= player.speed;
+        if(keys['s'] && player.y < canvas.height - player.r) player.y += player.speed;
+        if(keys['a'] && player.x > player.r) player.x -= player.speed;
+        if(keys['d'] && player.x < canvas.width - player.r) player.x += player.speed;
+
+        ctx.fillStyle = player.color;
+        ctx.shadowBlur = 15; ctx.shadowColor = player.color;
+        ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0;
 
         if(isMouseDown) fire();
-        player.update();
 
-        // Combo Logic
-        if(comboTimer > 0) {
-            comboTimer--;
-        } else {
-            combo = 1;
+        // Enemy Spawn
+        if(t - lastSpawn > 1500 - (level * 100)) {
+            enemies.push({ x: Math.random()*canvas.width, y: -20, r: 20, s: 2 + (level*0.2) });
+            lastSpawn = t;
         }
-        document.getElementById('combo-container').innerText = `COMBO x${combo}`;
 
-        // Particles
-        particles.forEach((p, i) => {
-            p.update(); p.draw();
-            if(p.alpha <= 0) particles.splice(i, 1);
-        });
-
-        // Projectiles with GLOW
+        // Projectiles
         projectiles.forEach((p, pi) => {
             p.x += p.v.x; p.y += p.v.y;
-            ctx.shadowBlur = 10; ctx.shadowColor = weaponData[p.type].color;
-            ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); 
-            ctx.fillStyle = weaponData[p.type].color; ctx.fill();
-            ctx.shadowBlur = 0;
+            ctx.fillStyle = p.color;
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+            if(p.x<0 || p.x>canvas.width || p.y<0 || p.y>canvas.height) projectiles.splice(pi, 1);
+        });
 
-            enemies.forEach((e, ei) => {
-                let dist = Math.hypot(p.x - e.x, p.y - e.y);
-                if (dist < p.r + e.r) {
-                    let isHeadshot = dist < e.r * 0.4;
-                    let points = (isHeadshot ? 50 : 10) * combo;
-                    score += points;
-                    
-                    // Combo Up
-                    combo++; comboTimer = 120; // 2 seconds at 60fps
-                    
-                    createExplosion(e.x, e.y, isHeadshot ? '#fff' : 'red', isHeadshot ? 25 : 12);
-                    enemies.splice(ei, 1);
-                    if(p.type !== 'sniper') projectiles.splice(pi, 1);
-                    updateUI();
+        // Enemies
+        enemies.forEach((e, ei) => {
+            let ang = Math.atan2(player.y - e.y, player.x - e.x);
+            e.x += Math.cos(ang) * e.s; e.y += Math.sin(ang) * e.s;
+            ctx.fillStyle = 'red';
+            ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI*2); ctx.fill();
+
+            projectiles.forEach((p, pi) => {
+                if(Math.hypot(p.x-e.x, p.y-e.y) < p.r+e.r) {
+                    enemies.splice(ei, 1); projectiles.splice(pi, 1);
+                    score += 10 * combo; combo++; comboTimer = 100;
                 }
             });
+
+            if(Math.hypot(player.x-e.x, player.y-e.y) < player.r+e.r) location.reload();
         });
 
-        enemies.forEach(e => {
-            let a = Math.atan2(player.y - e.y, player.x - e.x);
-            e.x += Math.cos(a) * e.s; e.y += Math.sin(a) * e.s;
-            
-            // Enemy Body
-            ctx.fillStyle = '#ff0033';
-            ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI*2); ctx.fill();
-            
-            // Neon Eye (Headshot Zone)
-            ctx.fillStyle = '#fff';
-            ctx.shadowBlur = 10; ctx.shadowColor = '#fff';
-            ctx.beginPath(); ctx.arc(e.x, e.y, e.r * 0.4, 0, Math.PI*2); ctx.fill();
-            ctx.shadowBlur = 0;
-
-            if (Math.hypot(player.x - e.x, player.y - e.y) < player.radius + e.r) {
-                createExplosion(player.x, player.y, '#00f2ff', 50);
-                setTimeout(() => location.reload(), 500);
-                gameActive = false;
-            }
-        });
+        if(comboTimer > 0) comboTimer--; else combo = 1;
+        document.getElementById('stats').innerText = `Score: ${score} | Level: ${level} | Ammo: ${ammo}/${maxAmmo}`;
+        document.getElementById('combo-container').innerText = `COMBO x${combo}`;
     }
 </script>
+</body>
+</html>
