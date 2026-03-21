@@ -1,13 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Strike - Final Build</title>
+    <style>
+        body { margin: 0; background: #000; color: #0ff; font-family: 'Courier New', Courier, monospace; overflow: hidden; cursor: crosshair; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
+        #hp-bg, #boss-hp-bg { width: 220px; height: 15px; background: #222; border: 2px solid #0ff; margin-top: 5px; }
+        #hp-fill { width: 100%; height: 100%; background: #0f0; transition: 0.1s; }
+        #boss-hp-fill { width: 100%; height: 100%; background: #f00; }
+        #boss-ui { display: none; margin-top: 15px; color: #f00; font-weight: bold; }
+        #menu { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            z-index: 20; text-align: center; background: rgba(0,0,0,0.9); padding: 50px; border: 3px solid #0ff; 
+        }
+        .btn { background: #0ff; color: #000; border: none; padding: 15px; font-weight: bold; cursor: pointer; width: 280px; margin: 10px; font-size: 20px; }
+        .btn:hover { background: #fff; box-shadow: 0 0 20px #fff; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        SCORE: <span id="sc">0</span> | AMMO: <span id="am">15</span>
+        <div id="hp-bg"><div id="hp-fill"></div></div>
+        
+        <div id="boss-ui">
+            BOSS DETECTED
+            <div id="boss-hp-bg"><div id="boss-hp-fill"></div></div>
+        </div>
+    </div>
+
+    <div id="menu">
+        <h1 style="font-size: 40px; text-shadow: 0 0 10px #0ff;">NEON STRIKE</h1>
+        <p>WASD to Move | Mouse to Shoot<br>Press [E] for Ability</p>
+        <button class="btn" id="startAR">ASSAULT (Dash Ability)</button><br>
+        <button class="btn" id="startSG">SHOTGUN (Explode Ability)</button>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
 <script>
 window.onload = function() {
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const menu = document.getElementById('menu');
+    const bossUI = document.getElementById('boss-ui');
     
     let w, h, player, active = false, audioCtx = null;
     let bullets = [], enemies = [], explosions = [], heals = [], keys = {};
     let score = 0, gun = 'AR', mx = 0, my = 0, abilityCD = 0, boss = null, goldMode = 0;
-    let shake = 0; // Screen shake intensity
 
     function resize() {
         w = canvas.width = window.innerWidth;
@@ -35,7 +77,6 @@ window.onload = function() {
         menu.style.display = 'none';
         player = { x: w/2, y: h/2, hp: 100, ammo: 15 };
         active = true; score = 0; bullets = []; enemies = []; explosions = []; heals = []; boss = null;
-        setInterval(() => { if(active) beep(boss ? 50 : 80, 'triangle', 0.5, 0.05); }, 500);
         update();
     }
 
@@ -53,26 +94,26 @@ window.onload = function() {
         const ang = Math.atan2(my - player.y, mx - player.x);
         if (goldMode > 0) {
             for(let i=-1; i<=1; i++) bullets.push({x: player.x, y: player.y, vx: Math.cos(ang+i*0.1)*22, vy: Math.sin(ang+i*0.1)*22, s:5, p:true});
-            beep(600, 'sine', 0.1, 0.1);
+            beep(600, 'sine', 0.1, 0.05);
         } else if (gun === 'AR') {
             bullets.push({x: player.x, y: player.y, vx: Math.cos(ang)*20, vy: Math.sin(ang)*20, s:4, p:true});
-            player.ammo--; beep(400, 'sawtooth', 0.1, 0.1);
+            player.ammo--; beep(400, 'sawtooth', 0.1, 0.05);
         } else {
             for(let i=-2; i<=2; i++) bullets.push({x: player.x, y: player.y, vx: Math.cos(ang+i*0.15)*14, vy: Math.sin(ang+i*0.15)*14, s:6, p:true});
-            player.ammo -= 3; beep(200, 'sawtooth', 0.2, 0.1);
+            player.ammo -= 3; beep(200, 'sawtooth', 0.2, 0.05);
         }
         if (player.ammo <= 0 && goldMode <= 0) setTimeout(() => player.ammo = 15, 800);
     };
 
     function useAbility() {
-        if (abilityCD > 0) return;
-        abilityCD = 250; 
+        if (abilityCD > 0 || !active) return;
+        abilityCD = 200; 
         if (gun === 'AR') {
             let dx = (keys.d?1:0)-(keys.a?1:0), dy = (keys.s?1:0)-(keys.w?1:0);
             if(dx==0 && dy==0) dy = -1;
-            player.x += dx * 300; player.y += dy * 300; beep(900, 'sine', 0.2, 0.2);
+            player.x += dx * 250; player.y += dy * 250; beep(800, 'sine', 0.2, 0.1);
         } else {
-            explosions.push({x: player.x, y: player.y, r: 0, max: 350}); shake = 15; beep(50, 'square', 0.5, 0.3);
+            explosions.push({x: player.x, y: player.y, r: 0, max: 300}); beep(50, 'square', 0.5, 0.2);
         }
     }
 
@@ -80,102 +121,100 @@ window.onload = function() {
         if (!active) return;
         requestAnimationFrame(update);
 
-        // Screen Shake Logic
-        let sx = (Math.random() - 0.5) * shake;
-        let sy = (Math.random() - 0.5) * shake;
-        if(shake > 0) shake *= 0.9;
-
-        ctx.setTransform(1,0,0,1,sx,sy); // Apply Shake
-        ctx.fillStyle = boss && boss.isTitan ? 'rgba(30, 0, 30, 0.3)' : 'rgba(0,0,0,0.2)';
-        ctx.fillRect(-50, -50, w+100, h+100);
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(0, 0, w, h);
 
         if (abilityCD > 0) abilityCD--;
-        if (goldMode > 0) { goldMode--; if(goldMode % 30 === 0) player.hp = Math.min(100, player.hp + 1); }
+        if (goldMode > 0) { goldMode--; if(goldMode % 40 === 0) player.hp = Math.min(100, player.hp + 1); }
 
-        // Boss Logic
-        if (score >= 500 && !boss && score < 1500) {
+        // Boss Spawn
+        if (score >= 500 && !boss && score < 4000) {
             boss = { x: w/2, y: -100, hp: 1000, maxHp: 1000, timer: 0, isTitan: false };
-            document.getElementById('boss-ui').style.display = 'block';
-        } 
-        if (score >= 5000 && !boss) {
-            boss = { x: w/2, y: -150, hp: 5000, maxHp: 5000, timer: 0, isTitan: true };
-            document.getElementById('boss-ui').style.display = 'block';
-            shake = 20; beep(40, 'square', 1.5, 0.5);
+            bossUI.style.display = 'block';
+        } else if (score >= 5000 && !boss) {
+            boss = { x: w/2, y: -100, hp: 5000, maxHp: 5000, timer: 0, isTitan: true };
+            bossUI.style.display = 'block';
         }
 
+        // Movement
         let s = (keys.shift ? 10 : 6);
         if (keys.w && player.y > 20) player.y -= s; if (keys.s && player.y < h-20) player.y += s;
         if (keys.a && player.x > 20) player.x -= s; if (keys.d && player.x < w-20) player.x += s;
 
-        // Draw Player
+        // Draw Player & Heals
         ctx.fillStyle = goldMode > 0 ? '#ff0' : '#0ff';
         ctx.beginPath(); ctx.arc(player.x, player.y, 15, 0, 7); ctx.fill();
 
-        // HP Recovery Drops
         heals.forEach((h, i) => {
-            ctx.fillStyle = '#0f0';
-            ctx.fillRect(h.x-10, h.y-3, 20, 6); ctx.fillRect(h.x-3, h.y-10, 6, 20); // Draw Cross
-            if(Math.hypot(player.x-h.x, player.y-h.y) < 30) { player.hp = Math.min(100, player.hp + 25); heals.splice(i, 1); beep(1200, 'sine', 0.2, 0.2); }
+            ctx.fillStyle = '#0f0'; ctx.fillRect(h.x-10, h.y-3, 20, 6); ctx.fillRect(h.x-3, h.y-10, 6, 20);
+            if(Math.hypot(player.x-h.x, player.y-h.y) < 30) { player.hp = Math.min(100, player.hp + 20); heals.splice(i, 1); beep(1000, 'sine', 0.2, 0.1); }
         });
 
+        // Boss Pattern
         if (boss) {
-            if (boss.y < 150) boss.y += 1.5;
-            boss.x += Math.sin(Date.now()*0.002)*(boss.isTitan ? 6 : 3);
+            if (boss.y < 120) boss.y += 2;
+            boss.x += Math.sin(Date.now()*0.002)*(boss.isTitan ? 5 : 2);
             ctx.fillStyle = boss.isTitan ? '#f0f' : '#f00';
-            ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.isTitan ? 110 : 80, 0, 7); ctx.fill();
+            ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.isTitan ? 100 : 70, 0, 7); ctx.fill();
             document.getElementById('boss-hp-fill').style.width = (boss.hp/boss.maxHp)*100 + "%";
+            
             boss.timer++;
             if (boss.timer % (boss.isTitan ? 30 : 60) === 0) {
-                shake = boss.isTitan ? 8 : 3;
-                for(let i=0; i< (boss.isTitan ? 24 : 12); i++) {
-                    let a = (Math.PI*2/ (boss.isTitan ? 24 : 12))*i + (boss.timer*0.02);
-                    bullets.push({x: boss.x, y: boss.y, vx: Math.cos(a)*7, vy: Math.sin(a)*7, s:10, p:false});
+                for(let i=0; i< (boss.isTitan ? 20 : 12); i++) {
+                    let a = (Math.PI*2/ (boss.isTitan ? 20 : 12))*i;
+                    bullets.push({x: boss.x, y: boss.y, vx: Math.cos(a)*6, vy: Math.sin(a)*6, s:10, p:false});
                 }
             }
         }
 
+        // Bullets & Collision
         bullets.forEach((b, i) => {
             b.x += b.vx; b.y += b.vy;
             ctx.fillStyle = b.p ? '#ff0' : (boss && boss.isTitan ? '#f0f' : '#f00');
             ctx.fillRect(b.x, b.y, b.s, b.s);
-            if (b.p && boss && Math.hypot(b.x-boss.x, b.y-boss.y) < (boss.isTitan ? 110 : 80)) {
-                boss.hp -= 20; bullets.splice(i, 1); shake = 4;
+
+            if (b.p && boss && Math.hypot(b.x-boss.x, b.y-boss.y) < (boss.isTitan ? 100 : 70)) {
+                boss.hp -= 20; bullets.splice(i, 1);
                 if (boss.hp <= 0) {
-                    for(let j=0; j<15; j++) explosions.push({x: boss.x+(Math.random()-0.5)*200, y: boss.y+(Math.random()-0.5)*200, r:0, max:300});
-                    score += boss.isTitan ? 10000 : 2000; goldMode = 1000; boss = null;
-                    document.getElementById('boss-ui').style.display = 'none';
+                    score += boss.isTitan ? 5000 : 1000; goldMode = 800; boss = null; bossUI.style.display = 'none';
                 }
             }
-            if (!b.p && Math.hypot(b.x-player.x, b.y-player.y) < 20) { player.hp -= boss && boss.isTitan ? 12 : 8; bullets.splice(i, 1); shake = 10; }
+            if (!b.p && Math.hypot(b.x-player.x, b.y-player.y) < 20) { player.hp -= 10; bullets.splice(i, 1); }
             if (b.x<0 || b.x>w || b.y<0 || b.y>h) bullets.splice(i, 1);
         });
 
-        explosions.forEach((ex, i) => {
-            ex.r += 12;
-            ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.arc(ex.x, ex.y, ex.r, 0, 7); ctx.stroke();
-            enemies.forEach((e, ei) => { if(Math.hypot(ex.x-e.x, ex.y-e.y) < ex.r) { enemies.splice(ei, 1); score+=15; } });
-            if (ex.r > ex.max) explosions.splice(i, 1);
-        });
-
-        if (!boss && Math.random() < 0.05) enemies.push({x: Math.random()*w, y: -20, s: 3.5});
+        // Enemies
+        if (!boss && Math.random() < 0.04) enemies.push({x: Math.random()*w, y: -20});
         enemies.forEach((e, i) => {
             let a = Math.atan2(player.y - e.y, player.x - e.x);
             e.x += Math.cos(a) * 3; e.y += Math.sin(a) * 3;
             ctx.fillStyle = '#f0f'; ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, 7); ctx.fill();
+            
             bullets.forEach((b, bi) => {
                 if (b.p && Math.hypot(b.x-e.x, b.y-e.y) < 20) {
-                    if(Math.random() < 0.1) heals.push({x: e.x, y: e.y}); // 10% DROP CHANCE
-                    enemies.splice(i, 1); bullets.splice(bi, 1); score += 15;
+                    if(Math.random() < 0.1) heals.push({x: e.x, y: e.y});
+                    enemies.splice(i, 1); bullets.splice(bi, 1); score += 10;
                 }
             });
             if (Math.hypot(player.x-e.x, player.y-e.y) < 30) player.hp -= 0.5;
         });
 
+        // Explosions
+        explosions.forEach((ex, i) => {
+            ex.r += 10;
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(ex.x, ex.y, ex.r, 0, 7); ctx.stroke();
+            enemies.forEach((e, ei) => { if(Math.hypot(ex.x-e.x, ex.y-e.y) < ex.r) { enemies.splice(ei, 1); score+=10; } });
+            if (ex.r > ex.max) explosions.splice(i, 1);
+        });
+
+        // UI Updates
         document.getElementById('sc').innerText = score;
         document.getElementById('am').innerText = goldMode > 0 ? "ULTRA" : player.ammo;
         document.getElementById('hp-fill').style.width = player.hp + "%";
-        if (player.hp <= 0) location.reload();
+        if (player.hp <= 0) { alert("GAME OVER! Score: " + score); location.reload(); }
     }
 };
 </script>
+</body>
+</html>
